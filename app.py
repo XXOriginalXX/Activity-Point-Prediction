@@ -29,110 +29,100 @@ def allowed_file(filename):
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def extract_text_from_image(file_path):
-    """Extract text from uploaded image using OCR with multiple techniques"""
+    """Advanced text extraction with multiple techniques and detailed logging"""
     try:
-        # Open image and preprocess
+        # Open image 
         image = Image.open(file_path)
         
-        # Try multiple preprocessing techniques
+        # Log image details
+        logger.debug(f"Image Mode: {image.mode}")
+        logger.debug(f"Image Size: {image.size}")
+        
+        # Multiple preprocessing techniques
         preprocessing_techniques = [
+            lambda img: img,  # Original image
             lambda img: img.convert('L'),  # Grayscale
             lambda img: img.convert('L').point(lambda x: 0 if x < 128 else 255, '1'),  # Binary
         ]
 
         extracted_texts = []
-        for preprocess in preprocessing_techniques:
-            processed_image = preprocess(image)
-            text = pytesseract.image_to_string(processed_image, lang='eng')
-            extracted_texts.append(text.lower())
-            logger.debug(f"Extracted text (preprocessing technique): {text}")
+        for i, preprocess in enumerate(preprocessing_techniques):
+            try:
+                processed_image = preprocess(image)
+                
+                # Configure Tesseract with detailed configuration
+                custom_config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+                
+                # Extract text with different configurations
+                text = pytesseract.image_to_string(processed_image, config=custom_config)
+                
+                logger.debug(f"Technique {i} Raw Extracted Text: {text}")
+                
+                # Clean and normalize text
+                clean_text = re.sub(r'\s+', ' ', text).strip().lower()
+                
+                if clean_text and len(clean_text) > 10:
+                    extracted_texts.append(clean_text)
+                    logger.debug(f"Technique {i} Cleaned Text: {clean_text}")
+            
+            except Exception as tech_error:
+                logger.error(f"Error in preprocessing technique {i}: {tech_error}")
 
-        # Combine and deduplicate texts
+        # Combine unique texts
         full_text = ' '.join(set(extracted_texts))
         
-        logger.debug(f"Final extracted text: {full_text}")
+        logger.debug(f"FINAL COMBINED TEXT: {full_text}")
         return full_text
+    
     except Exception as e:
-        logger.error(f"Error extracting text: {e}")
+        logger.error(f"Comprehensive text extraction error: {e}")
         return ""
 
 def predict_points(text):
-    """Predict activity points with comprehensive pattern matching"""
-    logger.debug(f"Analyzing text for points: {text}")
+    """Advanced points prediction with comprehensive logging"""
+    logger.debug(f"FULL TEXT ANALYSIS: {text}")
 
-    # Comprehensive NPTEL detection patterns
+    # Comprehensive NPTEL detection patterns with more flexible matching
     nptel_patterns = [
         r'national programme on technology enhanced learning',
         r'nptel',
         r'online certification',
         r'course completed',
-        r'certificate of completion'
+        r'certificate of completion',
+        r'online course',
+        r'technology enhanced learning'
     ]
 
-    # Check for NPTEL patterns
+    # Enhanced pattern matching
     for pattern in nptel_patterns:
         if re.search(pattern, text, re.IGNORECASE):
-            logger.info("NPTEL Certificate Detected!")
+            logger.info(f"MATCHED PATTERN: {pattern}")
             return 50
 
-    # Specific patterns for different point categories
+    # Additional categorization patterns
     point_categories = [
-        # Hackathon achievements
-        {
-            'patterns': [r'hackathon', r'1st prize', r'winner'],
-            'points': 25
-        },
-        # Internships
-        {
-            'patterns': [r'internship', r'industrial training'],
-            'points': 25
-        },
-        # Professional development
-        {
-            'patterns': [r'workshop', r'seminar', r'conference', r'webinar'],
-            'points': 20
-        }
+        {'patterns': [r'hackathon', r'1st prize', r'winner'], 'points': 25, 'name': 'Hackathon'},
+        {'patterns': [r'internship', r'industrial training'], 'points': 25, 'name': 'Internship'},
+        {'patterns': [r'workshop', r'seminar', r'conference', r'webinar'], 'points': 20, 'name': 'Professional Development'}
     ]
 
     # Check other point categories
     for category in point_categories:
         for pattern in category['patterns']:
             if re.search(pattern, text, re.IGNORECASE):
-                logger.info(f"Matched category: {pattern}")
+                logger.info(f"Matched {category['name']} category with pattern: {pattern}")
                 return category['points']
 
-    # Default points with logging
-    logger.warning("No specific category matched. Awarding default points.")
+    # Detailed logging for default points
+    logger.warning("NO SPECIFIC CATEGORY MATCHED")
+    logger.warning(f"Unmatched Text: {text}")
     return 10
-
-def validate_certificate(text):
-    """Advanced certificate validation"""
-    # Minimum text length check
-    if len(text) < 50:
-        logger.warning(f"Certificate text too short: {len(text)} characters")
-        return False
-
-    # Check for certificate indicators
-    certificate_indicators = [
-        'certificate', 
-        'completion', 
-        'awarded', 
-        'verified', 
-        'recognized'
-    ]
-    
-    # Count meaningful indicators
-    indicator_count = sum(1 for indicator in certificate_indicators if indicator in text.lower())
-    
-    is_valid = indicator_count > 1
-    logger.debug(f"Certificate validation - Indicators found: {indicator_count}, Valid: {is_valid}")
-    return is_valid
 
 @app.route('/predict-points', methods=['POST'])
 def upload_certificate():
-    # File upload and processing logic
+    # Existing upload and processing logic with enhanced logging
     if 'certificate' not in request.files:
-        logger.error("No file uploaded")
+        logger.error("NO FILE UPLOADED")
         return jsonify({
             'error': 'No file uploaded',
             'points': 0
@@ -142,7 +132,7 @@ def upload_certificate():
     username = request.form.get('username', 'Unknown User')
 
     if file.filename == '':
-        logger.error("No selected file")
+        logger.error("NO SELECTED FILE")
         return jsonify({
             'error': 'No selected file',
             'points': 0
@@ -154,21 +144,14 @@ def upload_certificate():
         file.save(filepath)
 
         try:
-            # Extract text from image with detailed logging
+            # Detailed text extraction logging
+            logger.debug(f"Processing file: {filename}")
             extracted_text = extract_text_from_image(filepath)
-            logger.info(f"Full Extracted Text: {extracted_text}")
-
-            # Validate certificate
-            if not validate_certificate(extracted_text):
-                logger.warning("Certificate validation failed")
-                return jsonify({
-                    'error': 'Invalid or unrecognized certificate',
-                    'points': 0
-                }), 400
-
-            # Predict points with detailed logging
+            
+            # Points prediction
             points = predict_points(extracted_text)
-            logger.info(f"Points awarded: {points}")
+            
+            logger.info(f"FINAL POINTS AWARDED: {points}")
 
             return jsonify({
                 'username': username,
@@ -177,7 +160,7 @@ def upload_certificate():
             }), 200
 
         except Exception as e:
-            logger.error(f"Processing error: {e}")
+            logger.error(f"PROCESSING ERROR: {e}")
             return jsonify({
                 'error': f'Processing error: {str(e)}',
                 'points': 0
@@ -187,7 +170,7 @@ def upload_certificate():
             if os.path.exists(filepath):
                 os.remove(filepath)
 
-    logger.error("Invalid file type")
+    logger.error("INVALID FILE TYPE")
     return jsonify({
         'error': 'Invalid file type',
         'points': 0
