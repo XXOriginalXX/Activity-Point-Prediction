@@ -1,11 +1,10 @@
 import os
+import re
 import numpy as np
 from flask import Flask, request, jsonify
 from werkzeug.utils import secure_filename
 from PIL import Image
 import pytesseract
-import re
-import joblib
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -28,57 +27,113 @@ def extract_text_from_image(file_path):
     """Extract text from uploaded image using OCR"""
     try:
         image = Image.open(file_path)
-        text = pytesseract.image_to_string(image).lower()
-        return text
+        # Increase resolution for better OCR
+        image = image.convert('L')  # Convert to grayscale
+        text = pytesseract.image_to_string(image, lang='eng')
+        return text.lower()
     except Exception as e:
         print(f"Error extracting text: {e}")
         return ""
 
 def predict_points(text):
     """Predict activity points based on certificate text"""
-    # Keywords and their corresponding points
+    # Comprehensive keyword matching with weighted scoring
     certificate_patterns = {
-        'nptel': 50,
-        'national programme on technology enhanced learning': 50,
-        'hackathon 1st': 25,
-        'hackathon first': 25,
-        'internship': 25,
-        'workshop': 20,
-        'seminar': 20,
-        'conference': 20,
-        'participation': 10
+        # NPTEL specific patterns
+        'nptel': {
+            'keywords': [
+                'national programme on technology enhanced learning', 
+                'nptel', 
+                'online certification', 
+                'completed course'
+            ],
+            'points': 50
+        },
+        # Hackathon achievements
+        'hackathon': {
+            'keywords': [
+                'hackathon 1st', 
+                'hackathon first', 
+                'winner', 
+                '1st prize'
+            ],
+            'points': 25
+        },
+        # Internship recognition
+        'internship': {
+            'keywords': [
+                'internship', 
+                'industrial training', 
+                'work experience'
+            ],
+            'points': 25
+        },
+        # Professional development
+        'professional': {
+            'keywords': [
+                'workshop', 
+                'seminar', 
+                'conference', 
+                'webinar', 
+                'professional development'
+            ],
+            'points': 20
+        },
+        # Participation certificates
+        'participation': {
+            'keywords': [
+                'participation', 
+                'attendee', 
+                'certificate of attendance'
+            ],
+            'points': 10
+        }
     }
 
-    # Check for specific keywords
-    for pattern, points in certificate_patterns.items():
-        if pattern in text:
-            return points
+    # Perform comprehensive text analysis
+    for category, details in certificate_patterns.items():
+        for keyword in details['keywords']:
+            if keyword in text:
+                return details['points']
     
-    # Default points for unrecognized certificates
+    # Advanced pattern matching for NPTEL
+    nptel_patterns = [
+        r'national programme on technology enhanced learning',
+        r'nptel online certification',
+        r'course completed',
+        r'certificate of completion'
+    ]
+
+    for pattern in nptel_patterns:
+        if re.search(pattern, text, re.IGNORECASE):
+            return 50
+
+    # Default points
     return 10
 
 def validate_certificate(text):
-    """Basic certificate validation"""
-    # Check for typical certificate indicators
+    """Advanced certificate validation"""
+    # Minimum text length and meaningful content check
+    if len(text) < 50:
+        return False
+
+    # Check for certificate indicators
     certificate_indicators = [
-        'certificate', 'participation', 'completion', 
-        'awarded', 'verified', 'recognized'
+        'certificate', 
+        'completion', 
+        'awarded', 
+        'verified', 
+        'recognized'
     ]
     
-    # Count of certificate indicators
-    indicator_count = sum(1 for indicator in certificate_indicators if indicator in text)
+    # Count meaningful indicators
+    indicator_count = sum(1 for indicator in certificate_indicators if indicator in text.lower())
     
-    # Basic validation criteria
-    is_valid = (
-        len(text) > 50 and  # Minimum meaningful text length
-        indicator_count > 1  # At least two certificate indicators
-    )
-    
-    return is_valid
+    return indicator_count > 1
 
 @app.route('/predict-points', methods=['POST'])
 def upload_certificate():
-    # Check if file is present
+    # File upload and processing logic remains the same as previous version
     if 'certificate' not in request.files:
         return jsonify({
             'error': 'No file uploaded',
@@ -88,23 +143,21 @@ def upload_certificate():
     file = request.files['certificate']
     username = request.form.get('username', 'Unknown User')
 
-    # Check if filename is empty
     if file.filename == '':
         return jsonify({
             'error': 'No selected file',
             'points': 0
         }), 400
 
-    # File validation
     if file and allowed_file(file.filename):
-        # Secure filename and save
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
 
         try:
-            # Extract text from image
+            # Extract text from image with improved OCR
             extracted_text = extract_text_from_image(filepath)
+            print(f"Extracted Text: {extracted_text}")  # Debugging print
 
             # Validate certificate
             if not validate_certificate(extracted_text):
@@ -113,10 +166,10 @@ def upload_certificate():
                     'points': 0
                 }), 400
 
-            # Predict points
+            # Predict points with enhanced logic
             points = predict_points(extracted_text)
 
-            # Log activity (you might want to integrate with a database)
+            # Log activity
             print(f"User {username} uploaded certificate: {filename}, Points: {points}")
 
             return jsonify({
