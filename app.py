@@ -1,4 +1,3 @@
-```python
 import os
 import numpy as np
 from flask import Flask, request, jsonify
@@ -7,9 +6,6 @@ from PIL import Image
 import pytesseract
 import re
 import joblib
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.preprocessing import LabelEncoder
-from sklearn.ensemble import RandomForestClassifier
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -24,6 +20,7 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 def allowed_file(filename):
+    """Check if file extension is allowed"""
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -144,5 +141,4 @@ def upload_certificate():
     }), 400
 
 if __name__ == '__main__':
-    app.run(debug=True)
-```
+    app.run(host='0.0.0.0', port=5000)
