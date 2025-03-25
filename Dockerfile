@@ -1,37 +1,39 @@
 # Use official Python image
 FROM python:3.11-slim
 
-# Create a non-root user
-RUN useradd -m myuser
+# Avoid prompts from apt
+ENV DEBIAN_FRONTEND=noninteractive
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Essential build tools
+    build-essential \
+    # Tesseract dependencies
+    tesseract-ocr \
+    libtesseract-dev \
+    # Image processing libraries
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    # Cleanup to reduce image size
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 # Set the working directory in the container
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    tesseract-ocr \
-    && rm -rf /var/lib/apt/lists/*
+# Copy requirements file
+COPY requirements.txt .
 
-# Copy requirements file 
-COPY --chown=myuser:myuser requirements.txt .
-
-# Switch to non-root user
-USER myuser
-
-# Create a virtual environment
-RUN python -m venv venv
-ENV PATH="/app/venv/bin:$PATH"
-
-# Install Python dependencies
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Upgrade pip and install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Copy the entire application
-COPY --chown=myuser:myuser . .
+COPY . .
 
 # Expose the port Flask runs on
 EXPOSE 5000
