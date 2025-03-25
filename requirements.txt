@@ -1,0 +1,10 @@
+```
+flask
+flask-cors
+pillow
+pytesseract
+numpy
+scikit-learn
+joblib
+gunicorn
+```
