@@ -1,240 +1,200 @@
-import os
-import re
-import base64
-import logging
-import io
-from flask import Flask, request, jsonify, render_template
-from werkzeug.utils import secure_filename
-from PIL import Image
-import pytesseract
-from flask_cors import CORS
+import React, { useState, useRef } from 'react';
+import axios from 'axios';
+import { Upload, FileText, Award, AlertTriangle } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+interface ActivityPointsPredictionProps {
+  username: string;
+}
 
-app = Flask(__name__)
-CORS(app)
+const ActivityPointsPrediction: React.FC<ActivityPointsPredictionProps> = ({ username }) => {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [predictedPoints, setPredictedPoints] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-# Configuration
-UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg'}
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      // Validate file size (e.g., max 16MB)
+      if (file.size > 16 * 1024 * 1024) {
+        toast.error('File size exceeds 16MB limit');
+        return;
+      }
 
-# Ensure upload directory exists
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+      // Validate file type
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
+      if (!allowedTypes.includes(file.type)) {
+        toast.error('Invalid file type. Please upload JPG, PNG, or PDF');
+        return;
+      }
 
-@app.route('/')
-def health_check():
-    """Basic health check route"""
-    return jsonify({
-        'status': 'healthy',
-        'message': 'Certificate Points Prediction Service is running!'
-    }), 200
+      setSelectedFile(file);
+      setPredictedPoints(null);
+      setError(null);
+    }
+  };
 
-def allowed_file(filename):
-    """Check if file extension is allowed"""
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+  const convertToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (error) => reject(error);
+    });
+  };
 
-def preprocess_image(image):
-    """Apply various preprocessing techniques to improve OCR"""
-    # Convert to grayscale
-    gray = image.convert('L')
-    
-    # Apply thresholding to preprocess the image
-    threshold = gray.point(lambda x: 0 if x < 128 else 255, '1')
-    
-    return [
-        image,  # Original image
-        gray,   # Grayscale image
-        threshold  # Binary image
-    ]
-
-def extract_text_from_image(file_path):
-    """Advanced text extraction with multiple techniques"""
-    try:
-        # Open the image
-        original_image = Image.open(file_path)
-        
-        # Preprocess images
-        image_variants = preprocess_image(original_image)
-        
-        # Extract text from different image variants
-        text_variants = []
-        for img in image_variants:
-            # Increase tesseract configuration for better accuracy
-            text = pytesseract.image_to_string(
-                img, 
-                config='--psm 6 --oem 3 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.() '
-            ).lower()
-            text_variants.append(text)
-        
-        # Combine and clean texts
-        full_text = ' '.join(set(filter(bool, text_variants)))
-        
-        logger.debug(f"Extracted Text: {full_text}")
-        return full_text
-    except Exception as e:
-        logger.error(f"Text extraction error: {e}")
-        return ""
-
-def predict_points(text):
-    """Predict activity points with comprehensive pattern matching"""
-    logger.debug(f"Analyzing text: {text}")
-
-    # Comprehensive point detection patterns
-    point_categories = [
-        {
-            'name': 'NPTEL Certificate',
-            'patterns': [
-                r'national programme on technology enhanced learning',
-                r'nptel',
-                r'online certification',
-                r'course completed',
-                r'completion certificate'
-            ],
-            'points': 50
-        },
-        {
-            'name': 'Hackathon/Competition',
-            'patterns': [
-                r'hackathon', 
-                r'1st prize', 
-                r'winner', 
-                r'competition',
-                r'national level',
-                r'international'
-            ],
-            'points': 40
-        },
-        {
-            'name': 'Internship',
-            'patterns': [
-                r'internship', 
-                r'industrial training', 
-                r'work experience', 
-                r'professional training'
-            ],
-            'points': 30
-        },
-        {
-            'name': 'Professional Development',
-            'patterns': [
-                r'workshop', 
-                r'seminar', 
-                r'conference', 
-                r'webinar', 
-                r'professional development',
-                r'skill enhancement'
-            ],
-            'points': 20
-        }
-    ]
-
-    # Detailed logging for debugging
-    logger.info(f"Full text being analyzed: {text}")
-
-    # Check each category
-    for category in point_categories:
-        for pattern in category['patterns']:
-            if re.search(pattern, text, re.IGNORECASE):
-                logger.info(f"Matched category: {category['name']}")
-                return {
-                    'points': category['points'],
-                    'type': category['name']
-                }
-
-    # Default points for generic certificates
-    logger.warning("No specific category matched. Awarding default points.")
-    return {
-        'points': 10,
-        'type': 'Generic Certificate'
+  const handleFileUpload = async () => {
+    if (!selectedFile) {
+      toast.error('Please select a file first');
+      return;
     }
 
-@app.route('/predict-points', methods=['POST'])
-def upload_certificate():
-    """Certificate points prediction endpoint"""
-    # Check if request is JSON
-    if not request.is_json:
-        logger.error("Request must be JSON")
-        return jsonify({
-            'error': 'Invalid request format',
-            'points': 0
-        }), 400
+    setIsLoading(true);
+    setError(null);
+    setPredictedPoints(null);
 
-    # Get request data
-    data = request.get_json()
-    
-    # Validate input
-    if not data or 'certificate' not in data:
-        logger.error("No file uploaded")
-        return jsonify({
-            'error': 'No file uploaded',
-            'points': 0
-        }), 400
+    try {
+      // Convert file to base64
+      const base64File = await convertToBase64(selectedFile);
 
-    # Extract data
-    username = data.get('username', 'Unknown User')
-    filename = data.get('filename', 'certificate.jpg')
-    base64_data = data['certificate']
+      // Prepare payload
+      const payload = {
+        username,
+        certificate: base64File,
+        filename: selectedFile.name
+      };
 
-    try:
-        # Remove data URL prefix if present
-        if base64_data.startswith('data:'):
-            base64_data = base64_data.split(',')[1]
+      // Simulated API call for OCR and ML points prediction
+      const response = await axios.post('https://activity-point-prediction.onrender.com/predict-points', payload, {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000 // 30 seconds timeout
+      });
 
-        # Decode base64
-        image_data = base64.b64decode(base64_data)
-        image = Image.open(io.BytesIO(image_data))
+      // Process response
+      const { points, certificateType } = response.data;
 
-        # Save temporary file
-        temp_filepath = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(filename))
-        image.save(temp_filepath)
+      setPredictedPoints(points);
+      
+      // Notify user about points
+      toast.success(`${certificateType} Processed! ${points} points awarded.`);
+    } catch (err) {
+      console.error('Points prediction error:', err);
+      
+      // Detailed error handling
+      if (axios.isAxiosError(err)) {
+        if (err.response) {
+          // The request was made and the server responded with a status code
+          // that falls out of the range of 2xx
+          const errorMessage = err.response.data?.error || 'Server error occurred';
+          setError(errorMessage);
+          toast.error(errorMessage);
+        } else if (err.request) {
+          // The request was made but no response was received
+          setError('No response from server. Please check your internet connection.');
+          toast.error('Network error. Please check your connection.');
+        } else {
+          // Something happened in setting up the request that triggered an Error
+          setError('An unexpected error occurred. Please try again.');
+          toast.error('Unexpected error. Please try again.');
+        }
+      } else {
+        // Fallback for non-axios errors
+        setError('Failed to process certificate. Please try again.');
+        toast.error('Certificate processing failed');
+      }
+    } finally {
+      setIsLoading(false);
+      
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
 
-        try:
-            # Extract text from image
-            extracted_text = extract_text_from_image(temp_filepath)
-            logger.info(f"Full Extracted Text: {extracted_text}")
+  return (
+    <div className="bg-gray-900 rounded-lg p-6 space-y-4">
+      <h2 className="text-2xl font-bold mb-4 flex items-center">
+        <Award className="mr-3 text-yellow-500" />
+        Activity Points Prediction
+      </h2>
 
-            # Predict points
-            point_result = predict_points(extracted_text)
-            logger.info(f"Points awarded: {point_result['points']}")
+      <div className="border-2 border-dashed border-gray-700 rounded-lg p-6 text-center">
+        <input 
+          type="file" 
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          accept=".pdf,.jpg,.jpeg,.png"
+          className="hidden"
+          id="certificate-upload"
+        />
+        <label 
+          htmlFor="certificate-upload" 
+          className="cursor-pointer flex flex-col items-center"
+        >
+          <Upload size={48} className="text-blue-400 mb-4" />
+          <p className="text-gray-400">
+            {selectedFile 
+              ? `Selected: ${selectedFile.name}` 
+              : 'Upload Certificate (PDF, JPG, PNG)'}
+          </p>
+        </label>
+      </div>
 
-            return jsonify({
-                'username': username,
-                'points': point_result['points'],
-                'certificateType': point_result['type']
-            }), 200
+      {selectedFile && (
+        <button 
+          onClick={handleFileUpload}
+          disabled={isLoading}
+          className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          {isLoading ? 'Processing...' : 'Predict Points'}
+        </button>
+      )}
 
-        except Exception as e:
-            logger.error(f"Processing error: {e}")
-            return jsonify({
-                'error': f'Processing error: {str(e)}',
-                'points': 0
-            }), 500
-        finally:
-            # Clean up uploaded file
-            if os.path.exists(temp_filepath):
-                os.remove(temp_filepath)
+      {isLoading && (
+        <div className="flex justify-center items-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-blue-500"></div>
+        </div>
+      )}
 
-    except Exception as e:
-        logger.error(f"Base64 decoding error: {e}")
-        return jsonify({
-            'error': 'Invalid file format',
-            'points': 0
-        }), 400
+      {predictedPoints !== null && !isLoading && (
+        <div className="bg-gray-800 rounded-lg p-4 flex items-center justify-between">
+          <div className="flex items-center">
+            <FileText className="text-green-400 mr-3" />
+            <div>
+              <p className="font-semibold">Points Awarded</p>
+              <p className="text-gray-400">Based on certificate analysis</p>
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-yellow-500">
+            {predictedPoints} Points
+          </div>
+        </div>
+      )}
 
-# Error Handlers
-@app.errorhandler(413)
-def request_entity_too_large(error):
-    """Handle file too large errors"""
-    return jsonify({
-        'error': 'File too large. Maximum file size is 16MB',
-        'points': 0
-    }), 413
+      {error && (
+        <div className="bg-red-900/20 border border-red-500 rounded-lg p-4 flex items-center">
+          <AlertTriangle className="text-red-500 mr-3" />
+          <p className="text-red-400">{error}</p>
+        </div>
+      )}
 
-if __name__ == '__main__':
-    # Ensure Tesseract is installed and configured
-    pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'  # Update this path if needed
+      <div className="text-sm text-gray-500 mt-4">
+        <p>How Points are Calculated:</p>
+        <ul className="list-disc list-inside">
+          <li>NPTEL Certificates: 50 points</li>
+          <li>Hackathon/Competition Certificates: 40 points</li>
+          <li>Internship Certificates: 30 points</li>
+          <li>Professional Development Certificates: 20 points</li>
+          <li>Other Certificates: 10 points</li>
+        </ul>
+      </div>
+    </div>
+  );
+};
+
+export default ActivityPointsPrediction;
