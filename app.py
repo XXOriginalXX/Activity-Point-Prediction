@@ -1,8 +1,7 @@
 import os
 import re
 import logging
-import numpy as np
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from werkzeug.utils import secure_filename
 from PIL import Image
 import pytesseract
@@ -23,106 +22,89 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 # Ensure upload directory exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+@app.route('/')
+def health_check():
+    """Basic health check route"""
+    return jsonify({
+        'status': 'healthy',
+        'message': 'Certificate Points Prediction Service is running!'
+    }), 200
+
 def allowed_file(filename):
     """Check if file extension is allowed"""
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def extract_text_from_image(file_path):
-    """Advanced text extraction with multiple techniques and detailed logging"""
+    """Advanced text extraction with multiple techniques"""
     try:
-        # Open image 
         image = Image.open(file_path)
         
-        # Log image details
-        logger.debug(f"Image Mode: {image.mode}")
-        logger.debug(f"Image Size: {image.size}")
-        
         # Multiple preprocessing techniques
-        preprocessing_techniques = [
-            lambda img: img,  # Original image
-            lambda img: img.convert('L'),  # Grayscale
-            lambda img: img.convert('L').point(lambda x: 0 if x < 128 else 255, '1'),  # Binary
-        ]
-
-        extracted_texts = []
-        for i, preprocess in enumerate(preprocessing_techniques):
-            try:
-                processed_image = preprocess(image)
-                
-                # Configure Tesseract with detailed configuration
-                custom_config = r'--oem 3 --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
-                
-                # Extract text with different configurations
-                text = pytesseract.image_to_string(processed_image, config=custom_config)
-                
-                logger.debug(f"Technique {i} Raw Extracted Text: {text}")
-                
-                # Clean and normalize text
-                clean_text = re.sub(r'\s+', ' ', text).strip().lower()
-                
-                if clean_text and len(clean_text) > 10:
-                    extracted_texts.append(clean_text)
-                    logger.debug(f"Technique {i} Cleaned Text: {clean_text}")
-            
-            except Exception as tech_error:
-                logger.error(f"Error in preprocessing technique {i}: {tech_error}")
-
-        # Combine unique texts
-        full_text = ' '.join(set(extracted_texts))
+        text_variants = []
         
-        logger.debug(f"FINAL COMBINED TEXT: {full_text}")
+        # Original image
+        text_variants.append(pytesseract.image_to_string(image).lower())
+        
+        # Grayscale
+        gray_image = image.convert('L')
+        text_variants.append(pytesseract.image_to_string(gray_image).lower())
+        
+        # Binary image
+        binary_image = gray_image.point(lambda x: 0 if x < 128 else 255, '1')
+        text_variants.append(pytesseract.image_to_string(binary_image).lower())
+        
+        # Combine and clean texts
+        full_text = ' '.join(set(filter(bool, text_variants)))
+        
+        logger.debug(f"Extracted Text: {full_text}")
         return full_text
-    
     except Exception as e:
-        logger.error(f"Comprehensive text extraction error: {e}")
+        logger.error(f"Text extraction error: {e}")
         return ""
 
 def predict_points(text):
-    """Advanced points prediction with comprehensive logging"""
-    logger.debug(f"FULL TEXT ANALYSIS: {text}")
+    """Predict activity points with comprehensive pattern matching"""
+    logger.debug(f"Analyzing text: {text}")
 
-    # Comprehensive NPTEL detection patterns with more flexible matching
+    # NPTEL specific patterns
     nptel_patterns = [
         r'national programme on technology enhanced learning',
         r'nptel',
         r'online certification',
         r'course completed',
-        r'certificate of completion',
-        r'online course',
-        r'technology enhanced learning'
+        r'certificate of completion'
     ]
 
-    # Enhanced pattern matching
+    # Check for NPTEL patterns
     for pattern in nptel_patterns:
         if re.search(pattern, text, re.IGNORECASE):
-            logger.info(f"MATCHED PATTERN: {pattern}")
+            logger.info("NPTEL Certificate Detected!")
             return 50
 
-    # Additional categorization patterns
+    # Other point categories
     point_categories = [
-        {'patterns': [r'hackathon', r'1st prize', r'winner'], 'points': 25, 'name': 'Hackathon'},
-        {'patterns': [r'internship', r'industrial training'], 'points': 25, 'name': 'Internship'},
-        {'patterns': [r'workshop', r'seminar', r'conference', r'webinar'], 'points': 20, 'name': 'Professional Development'}
+        {'patterns': [r'hackathon', r'1st prize', r'winner'], 'points': 25},
+        {'patterns': [r'internship', r'industrial training'], 'points': 25},
+        {'patterns': [r'workshop', r'seminar', r'conference', r'webinar'], 'points': 20}
     ]
 
-    # Check other point categories
+    # Check other categories
     for category in point_categories:
         for pattern in category['patterns']:
             if re.search(pattern, text, re.IGNORECASE):
-                logger.info(f"Matched {category['name']} category with pattern: {pattern}")
+                logger.info(f"Matched category: {pattern}")
                 return category['points']
 
-    # Detailed logging for default points
-    logger.warning("NO SPECIFIC CATEGORY MATCHED")
-    logger.warning(f"Unmatched Text: {text}")
+    # Default points
+    logger.warning("No specific category matched")
     return 10
 
 @app.route('/predict-points', methods=['POST'])
 def upload_certificate():
-    # Existing upload and processing logic with enhanced logging
+    """Certificate points prediction endpoint"""
     if 'certificate' not in request.files:
-        logger.error("NO FILE UPLOADED")
+        logger.error("No file uploaded")
         return jsonify({
             'error': 'No file uploaded',
             'points': 0
@@ -132,7 +114,7 @@ def upload_certificate():
     username = request.form.get('username', 'Unknown User')
 
     if file.filename == '':
-        logger.error("NO SELECTED FILE")
+        logger.error("No selected file")
         return jsonify({
             'error': 'No selected file',
             'points': 0
@@ -144,14 +126,13 @@ def upload_certificate():
         file.save(filepath)
 
         try:
-            # Detailed text extraction logging
-            logger.debug(f"Processing file: {filename}")
+            # Extract text from image
             extracted_text = extract_text_from_image(filepath)
-            
-            # Points prediction
+            logger.info(f"Full Extracted Text: {extracted_text}")
+
+            # Predict points
             points = predict_points(extracted_text)
-            
-            logger.info(f"FINAL POINTS AWARDED: {points}")
+            logger.info(f"Points awarded: {points}")
 
             return jsonify({
                 'username': username,
@@ -160,7 +141,7 @@ def upload_certificate():
             }), 200
 
         except Exception as e:
-            logger.error(f"PROCESSING ERROR: {e}")
+            logger.error(f"Processing error: {e}")
             return jsonify({
                 'error': f'Processing error: {str(e)}',
                 'points': 0
@@ -170,11 +151,11 @@ def upload_certificate():
             if os.path.exists(filepath):
                 os.remove(filepath)
 
-    logger.error("INVALID FILE TYPE")
+    logger.error("Invalid file type")
     return jsonify({
         'error': 'Invalid file type',
         'points': 0
     }), 400
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
