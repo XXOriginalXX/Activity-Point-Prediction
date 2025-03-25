@@ -1,4 +1,3 @@
-```dockerfile
 # Use official Python image
 FROM python:3.11-slim
 
@@ -33,4 +32,3 @@ ENV FLASK_RUN_HOST=0.0.0.0
 
 # Use gunicorn for production-ready server
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
-```
